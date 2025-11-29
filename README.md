@@ -63,6 +63,6 @@ This bot can be hosted like any Node.js service:
 
       AIML_API_KEY=XXXXXXX
       ```
-
+    - Require a list of youtube channels Ids to scan in a `channels.txt` file at root. Each line should contain one channel ID, and all IDs start with 'UC'.
 ---
 
