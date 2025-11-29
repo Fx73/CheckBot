@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",        // ou "esnext" si tu utilises ESM
+    "target": "es2019",
+    "rootDir": "./src",          // dossier source
+    "outDir": "./dist",          // dossier de sortie
+    "moduleResolution": "node",  // important pour les imports relatifs
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "strict": true
+  }
+}
