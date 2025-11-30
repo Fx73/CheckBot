@@ -10,9 +10,13 @@ import { YouTubeService } from "./youtube.service";
 
 export class CheckBot {
     // Constantes pour les intervalles (en ms)
-    readonly HOT_INTERVAL = 10 * 60 * 1000;   // 10 minutes
-    readonly MEDIUM_INTERVAL = 60 * 60 * 1000; // 1 heure
-    readonly COLD_INTERVAL = 24 * 60 * 60 * 1000; // 1 jour
+    readonly HOT_INTERVAL = 60 * 60 * 1000; // 1 hour
+    readonly MEDIUM_INTERVAL = 12 * 60 * 60 * 1000; // 12 jours
+    readonly COLD_INTERVAL = 7 * 24 * 60 * 60 * 1000; // 1 week
+
+    readonly HOT_MAXDATE = 7 * 24 * 60 * 60 * 1000;
+    readonly MEDIUM_MAXDATE = 30 * 24 * 60 * 60 * 1000;
+    readonly COLD_MAXDATE = 365 * 24 * 60 * 60 * 1000;
 
     private channels: ChannelTable;
     private videos: VideoTable;
@@ -89,17 +93,18 @@ export class CheckBot {
 
     private assignBucket(publishedAt: string | Date): VideoBucket {
         const ageMs = Date.now() - new Date(publishedAt).getTime();
-        const oneWeekMs = 7 * 24 * 60 * 60 * 1000;
-        const oneMonthMs = 30 * 24 * 60 * 60 * 1000;
 
-        if (ageMs < oneWeekMs) {
+        if (ageMs < this.HOT_MAXDATE) {
             return VideoBucket.HOT;
-        } else if (ageMs < oneMonthMs) {
+        } else if (ageMs < this.MEDIUM_MAXDATE) {
             return VideoBucket.MEDIUM;
-        } else {
+        } else if (ageMs < this.COLD_MAXDATE) {
             return VideoBucket.COLD;
+        } else {
+            return VideoBucket.FROZEN;
         }
     }
+
 
 
     //#endregion
@@ -143,53 +148,89 @@ export class CheckBot {
     }
 
     async updateMedium() {
-        console.log(`\nMedium Update ...`)
-
-        await this.updateCommon(VideoBucket.MEDIUM);
-    }
-
-    async updateCold() {
         await this.updateChannels();
         await this.updateChannelsVideo();
 
-        console.log(`\nCold Update ...`)
+        console.log(`\nMedium Update ...`)
 
-        await this.updateCommon(VideoBucket.COLD);
+        await this.updateCommon(VideoBucket.MEDIUM);
 
         await this.demoteVideos();
+    }
 
+
+    async updateCold() {
+        function fastHash(str: string): number {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                hash ^= str.charCodeAt(i); // XOR accumulate
+            }
+            return hash;
+        }
+
+        console.log(`\nCold Update ...`)
+
+        const videos = this.videos.getVideosByBucket(VideoBucket.COLD);
+        const dayIndex = new Date().getDay(); // 0 = Sunday, 6 = Saturday
+        const batch = videos.filter(video => {
+            const hash = fastHash(video.id);
+            return hash % 7 === dayIndex;
+        });
+
+        console.log(`Starting scan for ${videos.length} videos...`);
+
+        for (const video of batch) {
+            await this.scanVideo(video);
+        }
+
+        console.log(`Scan done for ${videos.length} videos !`);
     }
     //#endregion
 
     //#region Video management
     async demoteVideos() {
         console.log(`Demoting videos...`);
+
+        // HOT → MEDIUM
         const hotVideos = this.videos.getVideosByBucket(VideoBucket.HOT);
         let count = 0;
         for (const video of hotVideos) {
             const publishedAt = video.publishedAt.getTime();
             const ageMs = Date.now() - publishedAt;
-            const oneWeekMs = 7 * 24 * 60 * 60 * 1000;
-            if (ageMs >= oneWeekMs) {
+            if (ageMs >= this.HOT_MAXDATE) {
                 count++;
                 this.videos.updateBucket(video.id, VideoBucket.MEDIUM);
             }
         }
         console.log(`Demoted ${count} videos from HOT to MEDIUM !`);
 
+        // MEDIUM → COLD
         const mediumVideos = this.videos.getVideosByBucket(VideoBucket.MEDIUM);
         count = 0;
         for (const video of mediumVideos) {
             const publishedAt = video.publishedAt.getTime();
             const ageMs = Date.now() - publishedAt;
-            const oneMonthMs = 30 * 24 * 60 * 60 * 1000;
-            if (ageMs >= oneMonthMs) {
+            if (ageMs >= this.MEDIUM_MAXDATE) {
                 count++;
                 this.videos.updateBucket(video.id, VideoBucket.COLD);
             }
         }
         console.log(`Demoted ${count} videos from MEDIUM to COLD !`);
+
+        // COLD → FROZEN
+        const coldVideos = this.videos.getVideosByBucket(VideoBucket.COLD);
+        count = 0;
+        for (const video of coldVideos) {
+            const publishedAt = video.publishedAt.getTime();
+            const ageMs = Date.now() - publishedAt;
+            if (ageMs >= this.COLD_MAXDATE) {
+                count++;
+                this.videos.updateBucket(video.id, VideoBucket.FROZEN);
+            }
+        }
+        console.log(`Demoted ${count} videos from COLD to FROZEN !`);
     }
+
 
     async scanVideo(video: VideoInfo) {
         const scantime = new Date();
@@ -322,7 +363,7 @@ export class CheckBot {
                 this.requests.removeRequest(req.id)
                 continue;
             }
-            const youtubeAnswer = req.handle + " " + comment.authorHandle + "\n" + answer;
+            const youtubeAnswer = req.handle + (req.handle != comment.authorHandle ? " " + comment.authorHandle : "") + "\n" + answer;
             const postResult = await this.youTubeService.postAnswerComment(youtubeAnswer, comment)
             if (postResult) {
                 this.requests.completeRequest(req.id, answer)

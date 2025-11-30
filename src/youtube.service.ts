@@ -102,6 +102,9 @@ export class YouTubeService {
         // dériver l’ID de la playlist uploads (UC → UU)
         const uploadsPlaylistId = channelId.replace(/^UC/, "UU");
 
+        const oneYearMs = 365 * 24 * 60 * 60 * 1000;
+        const cutoffDate = new Date(Date.now() - oneYearMs);
+
         const videos: { id: string; title: string; publishedAt: string }[] = [];
         let nextPageToken: string | undefined = undefined;
         let pageCount = 0;
@@ -118,6 +121,10 @@ export class YouTubeService {
                 for (const item of res.data.items) {
                     const publishedAt = item.snippet?.publishedAt;
                     if (lastCheckedAt && publishedAt && new Date(publishedAt) <= lastCheckedAt) {
+                        return videos;
+                    }
+
+                    if (new Date(publishedAt) < cutoffDate) {
                         return videos;
                     }
 
